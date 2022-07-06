@@ -2,11 +2,15 @@ package recipes.presentation;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import recipes.business.Recipe;
 import recipes.business.RecipeService;
+import recipes.business.User;
+import recipes.persistence.UserRepository;
 
 import javax.validation.Valid;
 import java.time.LocalDateTime;
@@ -20,34 +24,52 @@ public class RecipeController {
     @Autowired
     RecipeService recipeService;
 
+    @Autowired
+    UserRepository userRepo;
+
     @PostMapping("/api/recipe/new")
     @ResponseStatus(code= HttpStatus.OK)
-    public Map<String, Long> postRecipe(@Valid @RequestBody Recipe recipe) {
+    @Transactional
+    public Map<String, Long> postRecipe(@Valid @RequestBody Recipe recipe,
+                                        @AuthenticationPrincipal UserDetails details) {
         LocalDateTime ldt = LocalDateTime.now();
+        User user = userRepo.findByEmail(details.getUsername());
         return recipeService.save(
                 new Recipe(recipe.getName(),
                         recipe.getDescription(),
                         recipe.getIngredients(),
                         recipe.getDirections(),
                         recipe.getCategory(),
-                        ldt));
+                        ldt,
+                        user));
     }
 
     @PutMapping("/api/recipe/{id}")
     @ResponseStatus(code=HttpStatus.NO_CONTENT)
-    public void updateRecipe(@PathVariable long id, @Valid @RequestBody Recipe recipe) {
-        if (recipeService.findById(id).isEmpty()) {
+    @Transactional
+    public void updateRecipe(@PathVariable long id, @Valid @RequestBody Recipe recipe,
+                             @AuthenticationPrincipal UserDetails details) {
+        Optional<Recipe> recipeFromDB = recipeService.findById(id);
+        if (recipeFromDB.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         } else {
             LocalDateTime ldt = LocalDateTime.now();
-            recipeService.save(
-                    new Recipe(id,
-                            recipe.getName(),
-                            recipe.getDescription(),
-                            recipe.getIngredients(),
-                            recipe.getDirections(),
-                            recipe.getCategory(),
-                            ldt));
+            User userUpdating = userRepo.findByEmail(details.getUsername());
+            User userAuthor = recipeFromDB.get().getUser();
+            if (userUpdating == userAuthor) {
+                recipeService.save(
+                        new Recipe(id,
+                                recipe.getName(),
+                                recipe.getDescription(),
+                                recipe.getIngredients(),
+                                recipe.getDirections(),
+                                recipe.getCategory(),
+                                ldt,
+                                userUpdating));
+            } else {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+            }
+
         }
     }
 
@@ -80,17 +102,28 @@ public class RecipeController {
             return recipeService.findAllByCategory(category.get());
         }
 
-        if (name.isPresent()) {
-            return recipeService.findAllByNameContaining(name.get());
-        }
+        return name.map(s -> recipeService.findAllByNameContaining(s)).orElse(null);
 
-        return null;
     }
 
     @DeleteMapping("/api/recipe/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteRecipe(@PathVariable long id) {
-        if (!recipeService.deleteById(id)) {
+    @Transactional
+    public void deleteRecipe(@PathVariable long id, @AuthenticationPrincipal UserDetails details) {
+
+        Optional<Recipe> recipeFromDB = recipeService.findById(id);
+        if (recipeFromDB.isPresent()) {
+            User userDeleting = userRepo.findByEmail(details.getUsername());
+            User userAuthor = recipeFromDB.get().getUser();
+
+            if (userDeleting == userAuthor) {
+               if (!recipeService.deleteById(id)) {
+                   throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+               }
+            } else {
+                   throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+            }
+        } else {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
     }

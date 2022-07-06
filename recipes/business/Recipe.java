@@ -41,13 +41,19 @@ public class Recipe {
 
     private LocalDateTime date;
 
+    @JsonIgnore
+    @ManyToOne
+    @JoinColumn(name="user_id")
+    private User user;
+
     public Recipe(String name, String description, String[] ingredients,
-                  String[] directions, String category, LocalDateTime date) {
+                  String[] directions, String category, LocalDateTime date, User user) {
         this.name = name;
         this.description = description;
         this.ingredients = ingredients.clone();
         this.directions = directions.clone();
         this.category = category;
         this.date = date;
+        this.user = user;
     }
 }
